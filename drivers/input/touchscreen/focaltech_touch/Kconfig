@@ -1,0 +1,26 @@
+#
+# Focaltech Touchscreen driver configuration
+#
+
+config TOUCHSCREEN_FTS_FT3427
+        bool "Focaltech Touchscreen IC FT3427"
+		depends on I2C
+		default n
+		help
+		  Say Y here if you have Focaltech touch FT3427 panel.
+		  If unsure, say N.	
+config TOUCHSCREEN_FTS_FT8006
+        bool "Focaltech Touchscreen IC FT8006"
+		depends on I2C
+		default n
+		help
+		  Say Y here if you have Focaltech touch FT8006 panel.
+		  If unsure, say N.			  
+config FIRMWARE_CONFIG
+	string "fts firmware config"
+	
+config TOUCHSCREEN_FTS_DIRECTORY
+    string "Focaltech ts directory name"
+    default "focaltech_touch"
+    depends on TOUCHSCREEN_FTS
+    
