@@ -153,6 +153,10 @@ void prepare_namespace(void);
 void __init load_default_modules(void);
 int __init init_rootfs(void);
 
+#ifdef CONFIG_DEBUG_RODATA
+void mark_rodata_ro(void);
+#endif
+
 extern void (*late_time_init)(void);
 
 extern bool initcall_debug;
@@ -239,7 +243,11 @@ extern bool initcall_debug;
 #define security_initcall(fn) \
 	static initcall_t __initcall_##fn \
 	__used __section(.security_initcall.init) = fn
-
+#ifdef CONFIG_DO_DEFERRED_INITCALL
+#define deferred_initcall(fn) \
+	static initcall_t __initcall_##fn \
+	__used __section(.deferred_initcall.init) = fn
+#endif
 struct obs_kernel_param {
 	const char *str;
 	int (*setup_func)(char *);
@@ -282,7 +290,9 @@ void __init parse_early_options(char *cmdline);
  * be one per module.
  */
 #define module_init(x)	__initcall(x);
-
+#ifdef CONFIG_DO_DEFERRED_INITCALL
+#define deferred_module_init(x)	deferred_initcall(x);
+#endif
 /**
  * module_exit() - driver exit entry point
  * @x: function to be run when driver is removed

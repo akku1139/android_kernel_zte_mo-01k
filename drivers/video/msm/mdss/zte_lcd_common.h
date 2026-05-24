@@ -24,6 +24,7 @@
 #include <linux/proc_fs.h>
 
 #define ZTE_LCD_COVERT_BACKLEVEL
+#define ZTE_GET_BOOT_MODE
 #define ZTE_LCD_DEBUG
 
 
@@ -88,6 +89,7 @@ struct zte_lcd_reg_debug{
 #ifdef ZTE_LCD_COVERT_BACKLEVEL
 int  zte_covert_backlevel_function(int level,u32 bl_max);
 #endif
-
-
+extern struct mdss_dsi_ctrl_pdata *G_ctrl_pdata;
+extern bool power_off_remove_to_TP;
+int zte_get_boot_mode_func(void);
 #endif

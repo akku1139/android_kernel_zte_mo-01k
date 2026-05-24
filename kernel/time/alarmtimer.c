@@ -25,15 +25,12 @@
 #include <linux/posix-timers.h>
 #include <linux/workqueue.h>
 #include <linux/freezer.h>
-#include <linux/init.h>
 
 #ifdef CONFIG_MSM_PM
 #include "lpm-levels.h"
 #endif
 #include <linux/workqueue.h>
-
 #define ALARM_DELTA 120  
-
 /**
  * struct alarm_base - Alarm timer bases
  * @lock:		Lock for syncrhonized access to the base
@@ -63,63 +60,6 @@ static struct rtc_timer		rtctimer;
 static struct rtc_device	*rtcdev;
 static DEFINE_SPINLOCK(rtcdev_lock);
 static struct mutex power_on_alarm_lock;
-static struct alarm init_alarm;
-static ktime_t alarm_boottime_delta;
-static char boot_mode[20];
-
-/**
- * power_on_alarm_init - Init power on alarm value
- *
- * Read rtc alarm value after device booting up and add this alarm
- * into alarm queue.
- */
-void power_on_alarm_init(void)
-{
-	struct rtc_wkalrm rtc_alarm;
-	struct rtc_time rt;
-	unsigned long alarm_time;
-	struct rtc_device *rtc;
-	ktime_t alarm_ktime;
-    struct timespec boot_time;    
-
-	rtc = alarmtimer_get_rtcdev();
-
-	if (!rtc)
-		return;
-
-	rtc_read_alarm(rtc, &rtc_alarm);
-	rt = rtc_alarm.time;
-
-	rtc_tm_to_time(&rt, &alarm_time);
-    getboottime(&boot_time);
-
-	if (alarm_time) {
-		alarm_ktime = ktime_set(alarm_time, 0);
-		alarm_init(&init_alarm, ALARM_POWEROFF_REALTIME, NULL);
-		alarm_start(&init_alarm, alarm_ktime);
-	}
-}
-
-void alarmtimer_time_init(void)
-{
-	ktime_t kt_alarm;
-	struct rtc_wkalrm rtc_alarm;
-	struct rtc_time rt;
-	struct timespec boot_time;
-	struct rtc_device *rtc;
-
-	rtc = alarmtimer_get_rtcdev();
-	if (!rtc)
-		return;
-	rtc_read_alarm(rtc, &rtc_alarm);
-	rt = rtc_alarm.time;
-
-	kt_alarm = rtc_tm_to_ktime(rt);
-
-	getboottime(&boot_time);
-	alarm_boottime_delta = ktime_sub(kt_alarm, timespec_to_ktime(boot_time));
-
-}
 
 /**
  * set_power_on_alarm - set power on alarm value into rtc register
@@ -148,17 +88,14 @@ void set_power_on_alarm(void)
 	next = timerqueue_getnext(&base->timerqueue);
 	spin_unlock_irqrestore(&base->lock, flags);
 
+	rtc = alarmtimer_get_rtcdev();
+	if (!rtc)
+		goto exit;
+
 	if (next) {
 		alarm_ts = ktime_to_timespec(next->expires);
-        
-        if (strcmp(boot_mode, "charger") == 0)
-        {
-            alarm_secs = alarm_ts.tv_sec;
-        }
-        else
-        {        
-		    alarm_secs = alarm_ts.tv_sec - ALARM_DELTA;
-        }
+		//alarm_secs = alarm_ts.tv_sec;
+		 alarm_secs = alarm_ts.tv_sec - ALARM_DELTA;
 	}
 
 	if (!alarm_secs)
@@ -174,10 +111,6 @@ void set_power_on_alarm(void)
 	if (alarm_secs <= wall_time.tv_sec + 1)
 		goto disable_alarm;
 
-	rtc = alarmtimer_get_rtcdev();
-	if (!rtc)
-		goto exit;
-
 	rtc_read_time(rtc, &rtc_time);
 	rtc_tm_to_time(&rtc_time, &rtc_secs);
 	alarm_delta = wall_time.tv_sec - rtc_secs;
@@ -185,7 +118,7 @@ void set_power_on_alarm(void)
 
 	rtc_time_to_tm(alarm_time, &alarm.time);
 	alarm.enabled = 1;
-	rc = rtc_set_alarm(rtcdev, &alarm);
+	rc = rtc_set_alarm(rtc, &alarm);
 	if (rc)
 		goto disable_alarm;
 
@@ -193,7 +126,7 @@ void set_power_on_alarm(void)
 	return;
 
 disable_alarm:
-	rtc_alarm_irq_enable(rtcdev, 0);
+	rtc_timer_cancel(rtc, &rtc->aie_timer);
 exit:
 	mutex_unlock(&power_on_alarm_lock);
 }
@@ -304,13 +237,6 @@ static void alarm_work_func(struct work_struct *unused)
 	set_power_on_alarm();
 }
 
-static int __init get_boot_mode(char *str)
-{
-	strlcpy(boot_mode, str, sizeof(boot_mode));
-	return 1;
-}
-early_param("androidboot.mode", get_boot_mode);
-
 /**
  * alarmtimer_enqueue - Adds an alarm timer to an alarm_base timerqueue
  * @base: pointer to the base where the timer is being run
@@ -381,18 +307,8 @@ static enum hrtimer_restart alarmtimer_fired(struct hrtimer *timer)
 	spin_unlock_irqrestore(&base->lock, flags);
 
 	/* set next power off alarm */
-	if (alarm->type == ALARM_POWEROFF_REALTIME) {
-		if (strcmp(boot_mode, "charger") == 0) {
-			struct timespec boot_time;
-			ktime_t kt_boottime, kt_alarm;
-			getboottime(&boot_time);
-
-			kt_boottime = timespec_to_ktime(boot_time);
-			kt_alarm = ktime_add(kt_boottime, alarm_boottime_delta);
-			alarm_start(alarm, kt_alarm);
-		}    
+	if (alarm->type == ALARM_POWEROFF_REALTIME)
 		queue_delayed_work(power_off_alarm_workqueue, &work, 0);
-    }    
 
 	return ret;
 
@@ -549,7 +465,6 @@ static int alarmtimer_resume(struct device *dev)
 		return 0;
 	rtc_timer_cancel(rtc, &rtctimer);
 
-	queue_delayed_work(power_off_alarm_workqueue, &work, 0);
 	return 0;
 }
 
@@ -903,6 +818,15 @@ static int alarm_timer_set(struct k_itimer *timr, int flags,
 
 	/* start the timer */
 	timr->it.alarm.interval = timespec_to_ktime(new_setting->it_interval);
+
+	/*
+	 * Rate limit to the tick as a hot fix to prevent DOS. Will be
+	 * mopped up later.
+	 */
+	if (timr->it.alarm.interval.tv64 &&
+			ktime_to_ns(timr->it.alarm.interval) < TICK_NSEC)
+		timr->it.alarm.interval = ktime_set(0, TICK_NSEC);
+
 	exp = timespec_to_ktime(new_setting->it_value);
 	/* Convert (if necessary) to absolute time */
 	if (flags != TIMER_ABSTIME) {
@@ -1077,7 +1001,7 @@ static int alarm_timer_nsleep(const clockid_t which_clock, int flags,
 			goto out;
 	}
 
-	restart = &current_thread_info()->restart_block;
+	restart = &current->restart_block;
 	restart->fn = alarm_timer_nsleep_restart;
 	restart->nanosleep.clockid = type;
 	restart->nanosleep.expires = exp.tv64;

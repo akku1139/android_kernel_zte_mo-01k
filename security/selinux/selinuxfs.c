@@ -41,6 +41,7 @@
 #include "objsec.h"
 #include "conditional.h"
 
+
 /*
  * Preproc/postproc policy as binary image
  * by ZTE_BOOT_20151105
@@ -48,6 +49,7 @@
 #if defined(CONFIG_SECURITY_SELINUX_POLICYPROC)
 #include "ss/policyproc.h"
 #endif /* CONFIG_SECURITY_SELINUX_POLICYPROC */
+
 
 /* Policy capability filenames */
 static char *policycap_names[] = {
@@ -410,6 +412,7 @@ static int sel_open_policy(struct inode *inode, struct file *filp)
 	if (rc)
 		goto err;
 
+
 /*
  * Preproc/postproc policy as binary image
  * by ZTE_BOOT_20151105
@@ -420,6 +423,7 @@ static int sel_open_policy(struct inode *inode, struct file *filp)
 		goto err;
 	}
 #endif /* CONFIG_SECURITY_SELINUX_POLICYPROC */
+
 
 	policy_opened = 1;
 
@@ -551,6 +555,7 @@ static ssize_t sel_write_load(struct file *file, const char __user *buf,
 	if (copy_from_user(data, buf, count) != 0)
 		goto out;
 
+
 /*
  * Preproc/postproc policy as binary image
  * by ZTE_BOOT_20151105
@@ -560,6 +565,7 @@ static ssize_t sel_write_load(struct file *file, const char __user *buf,
 		goto out;
 	}
 #endif /* CONFIG_SECURITY_SELINUX_POLICYPROC */
+
 
 	length = security_load_policy(data, count);
 	if (length)

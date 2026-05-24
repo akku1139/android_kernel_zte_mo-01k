@@ -15,6 +15,7 @@
 		qcom,mdss-dsi-panel-name = "ft8716 djn 720p video mode dsi panel";
 		zte,lcd-proc-panel-name ="zteDJN(ft8716)_720*1280-5.0Inch";
 		//zte,panel-reset-early-enabled;
+		zte,power-off-remove-to-tp;
 		qcom,cont-splash-enabled;
 		qcom,mdss-dsi-panel-controller = <&mdss_dsi0>;
 		qcom,mdss-dsi-panel-type = "dsi_video_mode";

@@ -94,10 +94,10 @@ static int kernel_init(void *);
 extern void init_IRQ(void);
 extern void fork_init(unsigned long);
 extern void radix_tree_init(void);
-#ifndef CONFIG_DEBUG_RODATA
-static inline void mark_rodata_ro(void) { }
+#ifdef CONFIG_DO_DEFERRED_INITCALL
+struct workqueue_struct *deferred_initcall_wq;
+struct work_struct  deferred_initcall_work;
 #endif
-
 /*
  * Debug helper: via this flag we know that we are in 'early bootup code'
  * where only the boot processor is running with IRQ disabled.  This means
@@ -236,7 +236,8 @@ static int __init loglevel(char *str)
 early_param("loglevel", loglevel);
 
 /* Change NUL term back to "=", to make "param" the whole string. */
-static int __init repair_env_string(char *param, char *val, const char *unused)
+static int __init repair_env_string(char *param, char *val,
+				    const char *unused, void *arg)
 {
 	if (val) {
 		/* param=val or param="val"? */
@@ -253,14 +254,15 @@ static int __init repair_env_string(char *param, char *val, const char *unused)
 }
 
 /* Anything after -- gets handed straight to init. */
-static int __init set_init_arg(char *param, char *val, const char *unused)
+static int __init set_init_arg(char *param, char *val,
+			       const char *unused, void *arg)
 {
 	unsigned int i;
 
 	if (panic_later)
 		return 0;
 
-	repair_env_string(param, val, unused);
+	repair_env_string(param, val, unused, NULL);
 
 	for (i = 0; argv_init[i]; i++) {
 		if (i == MAX_INIT_ARGS) {
@@ -277,9 +279,10 @@ static int __init set_init_arg(char *param, char *val, const char *unused)
  * Unknown boot options get handed to init, unless they look like
  * unused parameters (modprobe will find them in /proc/cmdline).
  */
-static int __init unknown_bootoption(char *param, char *val, const char *unused)
+static int __init unknown_bootoption(char *param, char *val,
+				     const char *unused, void *arg)
 {
-	repair_env_string(param, val, unused);
+	repair_env_string(param, val, unused, NULL);
 
 	/* Handle obsolete-style parameters */
 	if (obsolete_checksetup(param))
@@ -420,7 +423,8 @@ static noinline void __init_refok rest_init(void)
 }
 
 /* Check for early params. */
-static int __init do_early_param(char *param, char *val, const char *unused)
+static int __init do_early_param(char *param, char *val,
+				 const char *unused, void *arg)
 {
 	const struct obs_kernel_param *p;
 
@@ -439,7 +443,8 @@ static int __init do_early_param(char *param, char *val, const char *unused)
 
 void __init parse_early_options(char *cmdline)
 {
-	parse_args("early options", cmdline, NULL, 0, 0, 0, do_early_param);
+	parse_args("early options", cmdline, NULL, 0, 0, 0, NULL,
+		   do_early_param);
 }
 
 /* Arch code calls this early on, or if not, just before other parsing. */
@@ -543,10 +548,10 @@ asmlinkage __visible void __init start_kernel(void)
 	after_dashes = parse_args("Booting kernel",
 				  static_command_line, __start___param,
 				  __stop___param - __start___param,
-				  -1, -1, &unknown_bootoption);
+				  -1, -1, NULL, &unknown_bootoption);
 	if (!IS_ERR_OR_NULL(after_dashes))
 		parse_args("Setting init args", after_dashes, NULL, 0, -1, -1,
-			   set_init_arg);
+			   NULL, set_init_arg);
 
 	jump_label_init();
 
@@ -577,6 +582,10 @@ asmlinkage __visible void __init start_kernel(void)
 		local_irq_disable();
 	idr_init_cache();
 	rcu_init();
+
+	/* trace_printk() and trace points may be used after this */
+	trace_init();
+
 	context_tracking_init();
 	radix_tree_init();
 	/* init some links before init_ISA_irqs() */
@@ -851,7 +860,7 @@ static void __init do_initcall_level(int level)
 		   initcall_command_line, __start___param,
 		   __stop___param - __start___param,
 		   level, level,
-		   &repair_env_string);
+		   NULL, &repair_env_string);
 
 	for (fn = initcall_levels[level]; fn < initcall_levels[level+1]; fn++)
 		do_one_initcall(*fn);
@@ -928,6 +937,81 @@ static int try_to_run_init_process(const char *init_filename)
 
 static noinline void __init kernel_init_freeable(void);
 
+#ifdef CONFIG_DEBUG_RODATA
+static bool rodata_enabled = true;
+static int __init set_debug_rodata(char *str)
+{
+	return strtobool(str, &rodata_enabled);
+}
+__setup("rodata=", set_debug_rodata);
+
+static void mark_readonly(void)
+{
+	if (rodata_enabled)
+		mark_rodata_ro();
+	else
+		pr_info("Kernel memory protection disabled.\n");
+}
+#else
+static inline void mark_readonly(void)
+{
+	pr_warn("This architecture does not have kernel memory protection.\n");
+}
+#endif
+
+#ifdef CONFIG_DO_DEFERRED_INITCALL
+static atomic_t deferred_initcalls_done = ATOMIC_INIT(1);
+static ssize_t deferred_initcalls_done_read_proc(struct file *file, char __user *buf,
+					   size_t nbytes, loff_t *ppos)
+{
+	int ret, len;
+	char tmp[3] = "1\n";
+
+	snprintf(tmp, 3, "%d\n", atomic_read(&deferred_initcalls_done));
+	tmp[2] = '\0';
+	len = min_t(size_t, nbytes, 3);
+	ret = copy_to_user(buf, tmp, len);
+	if (ret)
+		return -EFAULT;
+	*ppos += len;
+
+	return len;
+}
+
+
+static const struct file_operations deferred_initcalls_done_fops = {
+	.read           = deferred_initcalls_done_read_proc,
+};
+
+extern initcall_t __deferred_initcall_start[], __deferred_initcall_end[];
+
+
+/* call deferred init routines */
+void do_deferred_initcalls(void)
+{
+	initcall_t *call;
+
+	pr_info("Running do_deferred_initcalls()\n");
+
+	for (call = __deferred_initcall_start;
+	    call < __deferred_initcall_end; call++)
+		do_one_initcall(*call);
+
+	flush_scheduled_work();
+
+	free_initmem();
+
+	atomic_set(&deferred_initcalls_done, 1);
+}
+
+
+
+static void  deferred_initcall_work_func(struct work_struct *work)
+{
+	do_deferred_initcalls();
+}
+#endif
+
 static int __ref kernel_init(void *unused)
 {
 	int ret;
@@ -935,13 +1019,26 @@ static int __ref kernel_init(void *unused)
 	kernel_init_freeable();
 	/* need to finish all async __init code before freeing the memory */
 	async_synchronize_full();
+#ifndef CONFIG_DO_DEFERRED_INITCALL
 	free_initmem();
-	mark_rodata_ro();
+#endif
+	mark_readonly();
 	system_state = SYSTEM_RUNNING;
 	numa_default_policy();
 
 	flush_delayed_fput();
 
+#ifdef CONFIG_DO_DEFERRED_INITCALL
+	atomic_set(&deferred_initcalls_done, 0);
+	proc_create("deferred_initcalls_done", 0, NULL, &deferred_initcalls_done_fops);
+	deferred_initcall_wq = create_singlethread_workqueue("deferred_initcall_wq");
+	if (!deferred_initcall_wq) {
+		pr_err("Could not create work queue deferred_initcall_wq: no memory");
+	}
+	INIT_WORK(&deferred_initcall_work, deferred_initcall_work_func);
+	queue_work(deferred_initcall_wq, &deferred_initcall_work);
+	pr_info("deferred_initcall_work is queued\n");
+#endif
 	if (ramdisk_execute_command) {
 		ret = run_init_process(ramdisk_execute_command);
 		if (!ret)

@@ -320,7 +320,7 @@ static void __drop_largest_extent(struct inode *inode,
 }
 
 /* return true, if inode page is changed */
-bool f2fs_init_extent_tree(struct inode *inode, struct f2fs_extent *i_ext)
+static bool __f2fs_init_extent_tree(struct inode *inode, struct f2fs_extent *i_ext)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	struct extent_tree *et;
@@ -358,6 +358,16 @@ out:
 	return false;
 }
 
+bool f2fs_init_extent_tree(struct inode *inode, struct f2fs_extent *i_ext)
+{
+	bool ret =  __f2fs_init_extent_tree(inode, i_ext);
+
+	if (!F2FS_I(inode)->extent_tree)
+		set_inode_flag(inode, FI_NO_EXTENT);
+
+	return ret;
+}
+
 static bool f2fs_lookup_extent_tree(struct inode *inode, pgoff_t pgofs,
 							struct extent_info *ei)
 {
@@ -390,14 +400,14 @@ static bool f2fs_lookup_extent_tree(struct inode *inode, pgoff_t pgofs,
 	else
 		stat_inc_rbtree_node_hit(sbi);
 
-		*ei = en->ei;
-		spin_lock(&sbi->extent_lock);
-		if (!list_empty(&en->list)) {
-			list_move_tail(&en->list, &sbi->extent_list);
-			et->cached_en = en;
-		}
-		spin_unlock(&sbi->extent_lock);
-		ret = true;
+	*ei = en->ei;
+	spin_lock(&sbi->extent_lock);
+	if (!list_empty(&en->list)) {
+		list_move_tail(&en->list, &sbi->extent_list);
+		et->cached_en = en;
+	}
+	spin_unlock(&sbi->extent_lock);
+	ret = true;
 out:
 	stat_inc_total_hit(sbi);
 	read_unlock(&et->lock);

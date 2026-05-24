@@ -131,7 +131,7 @@ config SECURITY_SELINUX_POLICYDB_VERSION_MAX_VALUE
 	  installed under /etc/selinux/$SELINUXTYPE/policy, where
 	  SELINUXTYPE is defined in your /etc/selinux/config.
 
-#
+#/*[CQID:000000] zte root apk function begin 20161031,  */
 # Preproc/postproc policy as binary image
 # by ZTE_BOOT_20151105
 #

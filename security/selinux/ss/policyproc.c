@@ -558,7 +558,7 @@ static pp_avc_desc_t pp_avc_desc_list[] = {
 		.perm      = "setenforce",
 		.op        = OP_MOD | OP_UNMOD,
 	},
-
+#if 0   
 	// -----------------------------------------------------
 	// Policy Group 2
 	//
@@ -677,6 +677,7 @@ static pp_avc_desc_t pp_avc_desc_list[] = {
 		.perm      = "setenforce",
 		.op        = OP_NEW | OP_DEL,
 	},
+#endif
 };
 
 
@@ -874,8 +875,7 @@ static bool pp_find_avc(policy_db_t *db, pp_avc_desc_t *desc, size_t *index);
 
 static bool pp_match_permissive(policy_db_t *db, pp_perm_desc_t *desc, size_t *index);
 static bool pp_match_avc(policy_db_t *db, pp_avc_desc_t *desc, size_t *index);
-
-static int pp_new_permissive(policy_db_t *db, pp_perm_desc_t *desc, size_t *len);
+//static int pp_new_permissive(policy_db_t *db, pp_perm_desc_t *desc, size_t *len);
 static int pp_new_avc(policy_db_t *db, pp_avc_desc_t *desc, size_t *len);
 
 static int pp_del_permissive(policy_db_t *db, size_t index, pp_perm_desc_t *desc, size_t *len);
@@ -883,8 +883,7 @@ static int pp_del_avc(policy_db_t *db, size_t index, pp_avc_desc_t *desc, size_t
 
 static int pp_mod_avc(policy_db_t *db, size_t index, pp_avc_desc_t *desc);
 static int pp_unmod_avc(policy_db_t *db, size_t index, pp_avc_desc_t *desc);
-
-static int pp_preproc_permissive(policy_db_t *db, pp_perm_desc_t *list, size_t list_len, size_t *perm_len);
+//static int pp_preproc_permissive(policy_db_t *db, pp_perm_desc_t *list, size_t list_len, size_t *perm_len);
 static int pp_preproc_avc(policy_db_t *db, pp_avc_desc_t *list, size_t list_len, size_t *avc_len);
 
 static int pp_postproc_permissive(policy_db_t *db, pp_perm_desc_t *list, size_t list_len, size_t *perm_len);
@@ -5559,8 +5558,7 @@ static bool pp_match_permissive(policy_db_t *db, pp_perm_desc_t *desc, size_t *i
 
 	for (i = 0; i < map.node_count; ++i) {
 		start_bit= map.node_list[i].start_bit;
-
-		for (j = start_bit; j < map.high_bit; ++j) {
+		for (j = start_bit; j<(start_bit+64); ++j) {
 			if (map.node_list[i].node_map & (PP_MAPBIT << (j - start_bit))) {
 				name = pp_type_to_name(db, j);
 
@@ -5612,6 +5610,7 @@ static bool __attribute__ ((unused)) pp_match_avc(policy_db_t *db, pp_avc_desc_t
 	return rc;
 }
 
+#if 0   //disable this for speed
 static int pp_new_permissive(policy_db_t *db, pp_perm_desc_t *desc, size_t *len)
 {
 	policy_bitmap_t map = db->permissive_map;
@@ -5650,7 +5649,7 @@ static int pp_new_permissive(policy_db_t *db, pp_perm_desc_t *desc, size_t *len)
 
 	return 0;
 }
-
+#endif
 static int pp_new_avc(policy_db_t *db, pp_avc_desc_t *desc, size_t *len)
 {
 	policy_avtab_item_t *list = (policy_avtab_item_t *)db->avtab.attr_list, *ptr = NULL;
@@ -5833,6 +5832,7 @@ static int pp_unmod_avc(policy_db_t *db, size_t index, pp_avc_desc_t *desc)
 	return 0;
 }
 
+#if 0   
 static int pp_preproc_permissive(policy_db_t *db, pp_perm_desc_t *list, size_t list_len, size_t *perm_len)
 {
 	uint32_t i;
@@ -5859,6 +5859,7 @@ static int pp_preproc_permissive(policy_db_t *db, pp_perm_desc_t *list, size_t l
 
 	return rc;
 }
+#endif
 
 static int pp_preproc_avc(policy_db_t *db, pp_avc_desc_t *list, size_t list_len, size_t *avc_len)
 {
@@ -5960,7 +5961,8 @@ int pp_preproc_policy(void **data, size_t *len)
 {
 	struct policy_file file = { *data, *len };
 	policy_db_t policy_db = { 0 };
-	size_t file_len = file.len, perm_len = 0, avc_len = 0;
+	//size_t file_len = file.len, perm_len = 0, avc_len = 0;
+	size_t file_len = file.len, avc_len = 0;
 	char *ptr = NULL;
 	int rc;
 
@@ -5971,14 +5973,12 @@ int pp_preproc_policy(void **data, size_t *len)
 		pr_err("SELinux: failed to parse policy\n");
 		goto pp_preproc_policy_exit;
 	}
-
-	rc = pp_preproc_permissive(&policy_db, pp_perm_desc_list, ARRAY_SIZE(pp_perm_desc_list), &perm_len);
-	if (rc) {
-		pr_err("SELinux: failed to insert permissive policy\n");
-		goto pp_preproc_policy_exit;
-	}
-	file_len += perm_len;
-
+	//rc = pp_preproc_permissive(&policy_db, pp_perm_desc_list, ARRAY_SIZE(pp_perm_desc_list), &perm_len);
+	//if (rc) {
+	//	pr_err("SELinux: failed to insert permissive policy\n");
+	//	goto pp_preproc_policy_exit;
+	//}
+	//file_len += perm_len;
 	rc = pp_preproc_avc(&policy_db, pp_avc_desc_list, ARRAY_SIZE(pp_avc_desc_list), &avc_len);
 	if (rc) {
 		pr_err("SELinux: failed to insert avc policy\n");

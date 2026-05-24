@@ -2496,6 +2496,7 @@ static void tfa98xx_tapdet_work(struct work_struct *work)
 
 static void tfa98xx_monitor(struct work_struct *work)
 {
+	#if 0
 	struct tfa98xx *tfa98xx;
 	u16 val;
 
@@ -2547,6 +2548,7 @@ static void tfa98xx_monitor(struct work_struct *work)
 
 	/* reschedule */
 	queue_delayed_work(tfa98xx->tfa98xx_wq, &tfa98xx->monitor_work, 5*HZ);
+	#endif	
 	return ;
 }
 
@@ -3006,10 +3008,14 @@ static int tfa98xx_mute(struct snd_soc_dai *dai, int mute, int stream)
 			tfa98xx->cstream = 1;
 
 		/* Start DSP */
+		#if 0
 		if (tfa98xx->dsp_init != TFA98XX_DSP_INIT_PENDING)
 			queue_delayed_work(tfa98xx->tfa98xx_wq,
 							&tfa98xx->init_work,
 							0);
+		#else
+           tfa98xx_dsp_init(tfa98xx);
+		#endif
 	}
 
 	return 0;

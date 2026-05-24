@@ -10,7 +10,6 @@
 */
 
 #include <linux/rtc.h>
-#include <linux/alarmtimer.h>
 
 /* IMPORTANT: the RTC only stores whole seconds. It is arbitrary
  * whether it stores the most close value or the value with partial
@@ -63,8 +62,6 @@ static int __init rtc_hctosys(void)
 		tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
 		tm.tm_hour, tm.tm_min, tm.tm_sec,
 		(unsigned int) tv.tv_sec);
-        
-    alarmtimer_time_init();
 
 err_invalid:
 err_read:

@@ -1893,7 +1893,11 @@ static void __exit msm_eeprom_exit_module(void)
 	i2c_del_driver(&msm_eeprom_i2c_driver);
 }
 
+#ifdef CONFIG_DO_DEFERRED_INITCALL
+deferred_module_init(msm_eeprom_init_module);
+#else
 module_init(msm_eeprom_init_module);
+#endif
 module_exit(msm_eeprom_exit_module);
 MODULE_DESCRIPTION("MSM EEPROM driver");
 MODULE_LICENSE("GPL v2");

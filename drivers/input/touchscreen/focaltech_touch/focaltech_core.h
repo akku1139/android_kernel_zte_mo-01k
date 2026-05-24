@@ -156,6 +156,7 @@ struct fts_ts_data
     bool suspended;
     bool wakeup_gesture_enter;//zhangjian add
     bool wakeup_gesture_enable;
+    bool enable_sleep_mode;
     u8 fw_ver[3];
     u8 fw_vendor_id;
     int touchs;

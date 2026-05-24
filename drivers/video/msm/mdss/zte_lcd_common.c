@@ -2,7 +2,8 @@
 #include "zte_lcd_common.h"
 
 struct zte_lcd_info g_zte_lcd_info;
-
+struct mdss_dsi_ctrl_pdata *G_ctrl_pdata;
+bool power_off_remove_to_TP = false;
 #ifdef ZTE_LCD_COVERT_BACKLEVEL
 /*
 if use this func,you can canel the code MDSS_BRIGHT_TO_BL in mdss_fb_set_bl_brightness() of mdss_fb.c
@@ -99,36 +100,39 @@ static void  zte_check_lcd_type(struct device_node *node)
 #endif
 
 #ifdef ZTE_GET_BOOT_MODE
-static void zte_get_boot_mode_func(void)
+char g_zte_boot_mode;
+int zte_get_boot_mode_func(void)
 {
 	char *t=NULL;
 	char *search="androidboot.mode";
 
 	t=strstr(saved_command_line,search);
-	if(0==strcmp(t+17,"ffbm-99")) //17=androidboot.mode=
+	if(0==strncmp(t+17,"ffbm-99",7)) //17=androidboot.mode=
 	{
-		g_zte_lcd_info.boot_mode=BOOT_MODE_FTM;
+		g_zte_boot_mode=BOOT_MODE_FTM;
 	}
-	else if (0==strcmp(t+17,"recovery"))
+	else if (0==strncmp(t+17,"recovery",8))
 	{
-		g_zte_lcd_info.boot_mode=BOOT_MODE_RECOVERY;
+		g_zte_boot_mode=BOOT_MODE_RECOVERY;
 	}
-	else if (0==strcmp(t+17,"charger"))
+	else if (0==strncmp(t+17,"charger",7))
 	{
-		g_zte_lcd_info.boot_mode=BOOT_MODE_CHARGER;
+		g_zte_boot_mode=BOOT_MODE_CHARGER;
 	}
-	else if (0==strcmp(t+17,"normal"))
+	else if (0==strncmp(t+17,"normal",6))
 	{
-		g_zte_lcd_info.boot_mode=BOOT_MODE_NORMAL;
+		g_zte_boot_mode=BOOT_MODE_NORMAL;
 	}
-	else if (0==strcmp(t+17,"ffbm-01"))
+	else if (0==strncmp(t+17,"ffbm-01",7))
 	{
-		g_zte_lcd_info.boot_mode=BOOT_MODE_FFBM;
+		g_zte_boot_mode=BOOT_MODE_FFBM;
 	}
 	else
-		g_zte_lcd_info.boot_mode=BOOT_MODE_UNKNOWN;
+		g_zte_boot_mode=BOOT_MODE_UNKNOWN;
 
-	printk("[MSM_LCD]%s:g_boot_mode is %d\n",__FUNCTION__,g_zte_lcd_info.boot_mode);
+	printk("[MSM_LCD]%s:g_zte_boot_mode is %d\n",__FUNCTION__,g_zte_boot_mode);
+	
+	return g_zte_boot_mode;
 }
 #endif
 
@@ -156,6 +160,7 @@ void  zte_lcd_common_func(struct mdss_dsi_ctrl_pdata *ctrl_pdata,struct device_n
 {
 	const char * panel_name;
 
+	G_ctrl_pdata = ctrl_pdata;
 	#ifdef ZTE_GET_BOOT_MODE
 		zte_get_boot_mode_func();
 	#endif

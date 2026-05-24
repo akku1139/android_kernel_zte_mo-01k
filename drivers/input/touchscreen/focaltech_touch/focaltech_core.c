@@ -745,7 +745,7 @@ static int fts_read_touchdata(struct fts_ts_data *data)
 
         if ((event->au8_touch_event[i]==0 || event->au8_touch_event[i]==2)&&(event->point_num==0))
         {
-            FTS_DEBUG("abnormal touch data from fw");
+            FTS_ERROR("abnormal touch data from fw");
             return -1;
         }
     }
@@ -1105,13 +1105,13 @@ static int fb_notifier_callback(struct notifier_block *self,
         else if (*blank == FB_BLANK_POWERDOWN)
             fts_ts_suspend(&fts_data->client->dev);
     }
-    #else
-    if (evdata && evdata->data && fts_data && fts_data->client)
+    #else   
+    if (evdata && evdata->data && event == FB_EVENT_BLANK &&
+        fts_data && fts_data->client)
     {
         blank = evdata->data;
-        if ((*blank == FB_BLANK_UNBLANK && event == FB_EVENT_BLANK) ||
-             (*blank == FB_BLANK_POWERDOWN && event == FB_R_EARLY_EVENT_BLANK))
-        {    
+        if (*blank == FB_BLANK_UNBLANK)
+        {
             if (fts_data->fb_tpd_suspend_flag) 
             {
                 err = queue_work(fts_data->fb_tpd_resume_wq, &fts_data->fb_tpd_resume_work);
@@ -1122,14 +1122,14 @@ static int fb_notifier_callback(struct notifier_block *self,
                 }
             }
         }
-        else if (*blank == FB_BLANK_POWERDOWN && event ==FB_EARLY_EVENT_BLANK)     
-        {    
-            printk("%s lcd off notifier.\n", __func__);    
-            err = cancel_work_sync(&fts_data->fb_tpd_resume_work);
-            if (!err)
-                printk("cancel fb_tpd_resume_wq err = %d\n", err);
-            fts_ts_suspend(&fts_data->client->dev);            
-            fts_data->fb_tpd_suspend_flag = 1;
+        else if (*blank == FB_BLANK_POWERDOWN)
+        {
+             printk("%s lcd off notifier.\n", __func__);    
+             err = cancel_work_sync(&fts_data->fb_tpd_resume_work);
+             if (!err)
+                 printk("cancel fb_tpd_resume_wq err = %d\n", err);
+             fts_ts_suspend(&fts_data->client->dev);            
+             fts_data->fb_tpd_suspend_flag = 1;
         }
     }
     #endif
@@ -1221,13 +1221,69 @@ static int tpd_enable_wakegesture(struct tpd_classdev_t *cdev, int enable)
     
     return enable;
 }
+int fts_enter_sleep_mode(struct i2c_client *client)
+{
+	int ret = 0;
+	int cnt = 0;
+	u8  reg_value = 0;
+
+	do
+	{
+		ret =  fts_i2c_write_reg(client, FTS_REG_POWER_MODE, FTS_REG_POWER_MODE_SLEEP_VALUE);
+		if (ret < 0) {
+			FTS_INFO("TP Not Ready\n");
+			msleep(20);
+		} else {
+			msleep(50);
+			ret =  fts_i2c_read_reg(client, FTS_REG_POWER_MODE, &reg_value);
+			if (ret < 0) {
+				FTS_INFO("TP enter sleep mode.\n");
+				return 0;
+			}
+		}
+		FTS_INFO(" enter sleep mode retry again, cnt = %d.\n", cnt);
+		cnt++;
+	} while (cnt  < 10);
+	return -1;
+}
+static int tpd_get_sleep_mode(struct tpd_classdev_t *cdev)
+{
+    struct fts_ts_data  *data = (struct fts_ts_data* ) cdev->private;
+    printk("%s enable_sleep_mode val is:%d.\n", __func__, data->enable_sleep_mode);
+    cdev->b_sleep_enable = data->enable_sleep_mode;
+    return 0;
+}
+static int tpd_set_sleep_mode(struct tpd_classdev_t *cdev, int enable)
+{
+    struct fts_ts_data  *data = (struct fts_ts_data* ) cdev->private;
+    int retval = 0;
+
+    printk("%s previous val is:%d, current val is:%d.\n", __func__, data->enable_sleep_mode, enable);
+    
+    data->enable_sleep_mode = enable;
+    if (data->suspended)
+        return 0;
+    if (data->enable_sleep_mode) 
+    {
+        retval = fts_i2c_write_reg(data->client, FTS_REG_POWER_MODE, FTS_REG_POWER_MODE_SLEEP_VALUE);
+        if (retval < 0)
+        {
+            FTS_ERROR("Set TP to sleep mode fail, ret=%d!", retval);
+        }
+    }
+    else
+        fts_reset_proc(200);
+    return enable;
+}
 static int tpd_register_fw_class(struct fts_ts_data *data)
 {	
-	tpd_fw_cdev.private = (void*)data;	
-	tpd_fw_cdev.get_tpinfo = tpd_init_tpinfo;
-	tpd_fw_cdev.get_gesture = tpd_get_wakegesture;
-      tpd_fw_cdev.wake_gesture = tpd_enable_wakegesture;	
-	return 0;
+    tpd_fw_cdev.private = (void*)data;	
+    tpd_fw_cdev.get_tpinfo = tpd_init_tpinfo;
+    tpd_fw_cdev.get_gesture = tpd_get_wakegesture;
+    tpd_fw_cdev.wake_gesture = tpd_enable_wakegesture;
+    tpd_fw_cdev.get_sleep_mode = tpd_get_sleep_mode;
+    tpd_fw_cdev.set_sleep_mode = tpd_set_sleep_mode;
+    return 0;
 }
 //add end
 /*****************************************************************************
@@ -1322,6 +1378,7 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 //zhangjian add    
     data->wakeup_gesture_enable = false;
     data->wakeup_gesture_enter = false;
+    data->enable_sleep_mode = false;
     err = fts_ts_pinctrl_init(data);
     if (!err && data->ts_pinctrl) {
         /*
@@ -1513,6 +1570,7 @@ static int fts_ts_remove(struct i2c_client *client)
     return 0;
 }
 
+extern char g_zte_boot_mode;
 /*****************************************************************************
 *  Name: fts_ts_suspend
 *  Brief:
@@ -1572,15 +1630,24 @@ static int fts_ts_suspend(struct device *dev)
     fts_irq_disable();
 
     /* TP enter sleep mode */
-    retval = fts_i2c_write_reg(data->client, FTS_REG_POWER_MODE, FTS_REG_POWER_MODE_SLEEP_VALUE);
-    if (retval < 0)
+    if(g_zte_boot_mode == 4) 
     {
-        FTS_ERROR("Set TP to sleep mode fail, ret=%d!", retval);
+		FTS_ERROR("Do not Set TP to sleep mode");
+    }
+    else
+    {
+	    retval = fts_i2c_write_reg(data->client, FTS_REG_POWER_MODE, FTS_REG_POWER_MODE_SLEEP_VALUE);
+	    if (retval < 0)
+	    {
+	        FTS_ERROR("Set TP to sleep mode fail, ret=%d!", retval);
+	    }
     }
     data->suspended = true;
 #if FTS_POWER_SOURCE_CUST_EN
     fts_power_source_ctrl(data, 0);
 #endif
+    if (power_off_remove_to_TP)
+       msm_dss_vreg_power_off();
     FTS_FUNC_EXIT();
 
     return 0;
@@ -1597,6 +1664,8 @@ static int fts_ts_resume(struct device *dev)
 {
     struct fts_ts_data *data = dev_get_drvdata(dev);
     int err;
+    int retval = 0;
+
     FTS_FUNC_ENTER();
     if (!data->suspended)
     {
@@ -1640,6 +1709,15 @@ if ( data->wakeup_gesture_enter )
         if (err)
             FTS_ERROR("%s: disable_irq_wake failed",__func__);
         data->suspended = false;
+        if (data->enable_sleep_mode) 
+        {
+            retval = fts_enter_sleep_mode(data->client);
+            printk("Set TP to sleep mode!");
+            if (retval < 0)
+            {
+                FTS_ERROR("Set TP to sleep mode fail, ret=%d!", retval);
+            }
+        }
         FTS_FUNC_EXIT();
         return 0;
     }
@@ -1657,7 +1735,15 @@ if ( data->wakeup_gesture_enter )
 #endif
 
     data->suspended = false;
-
+    if (data->enable_sleep_mode) 
+    {
+        retval = fts_enter_sleep_mode(data->client);
+        printk("Set TP to sleep mode!");
+        if (retval < 0)
+        {
+            FTS_ERROR("Set TP to sleep mode fail, ret=%d!", retval);
+        }
+    }
     fts_irq_enable();
 
     FTS_FUNC_EXIT();
@@ -1725,7 +1811,11 @@ static void __exit fts_ts_exit(void)
     i2c_del_driver(&fts_ts_driver);
 }
 
+#ifdef CONFIG_DO_DEFERRED_INITCALL
+deferred_module_init(fts_ts_init);
+#else
 module_init(fts_ts_init);
+#endif
 module_exit(fts_ts_exit);
 
 MODULE_AUTHOR("FocalTech Driver Team");

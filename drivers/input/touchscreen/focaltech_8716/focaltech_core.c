@@ -1579,7 +1579,11 @@ static void __exit fts_ts_exit(void)
     i2c_del_driver(&fts_ts_driver);
 }
 
+#ifdef CONFIG_DO_DEFERRED_INITCALL
+deferred_module_init(fts_ts_init);
+#else
 module_init(fts_ts_init);
+#endif
 module_exit(fts_ts_exit);
 
 MODULE_AUTHOR("FocalTech Driver Team");

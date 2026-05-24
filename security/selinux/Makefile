@@ -13,7 +13,7 @@ selinux-$(CONFIG_SECURITY_NETWORK_XFRM) += xfrm.o
 
 selinux-$(CONFIG_NETLABEL) += netlabel.o
 
-#
+#/*[CQID:000000] zte root apk function begin 20161031,  */
 # Preproc/postproc policy as binary image
 # by ZTE_BOOT_20151105
 #

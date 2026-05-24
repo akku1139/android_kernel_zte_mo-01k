@@ -436,7 +436,60 @@ static void create_tpd_proc_entry(void)
 	} else
 		printk(KERN_INFO "create proc file failed!\n");
 }
+static ssize_t tp_sleep_mode_read(struct file *file,
+					 char __user *buffer, size_t count, loff_t *offset)
+{
+	ssize_t len = 0;
+	uint8_t data_buf[10] = {0};
+	struct tpd_classdev_t *cdev = &tpd_fw_cdev;
 
+	if (cdev->get_sleep_mode) {
+		cdev->get_sleep_mode(cdev);
+	}
+	pr_notice("tpd: %s val:%d.\n", __func__, cdev->b_sleep_enable);
+
+	len = snprintf(data_buf, sizeof(data_buf), "%u\n", cdev->b_sleep_enable);
+	return simple_read_from_buffer(buffer, count, offset, data_buf, len);
+}
+
+static ssize_t tp_sleep_mode_write(struct file *file,
+				const char __user *buffer, size_t len, loff_t *off)
+{
+	int ret;
+	unsigned int input;
+	char data_buf[10] = {0};
+	struct tpd_classdev_t *cdev = &tpd_fw_cdev;
+	pr_notice("tpd: %s.\n", __func__);
+	ret = copy_from_user(data_buf, buffer, len);
+	if (ret)
+		return -EINVAL;
+	ret = kstrtouint(data_buf, 0, &input);
+	if (ret)
+		return -EINVAL;
+	input = input > 0 ? 1 : 0;
+	pr_notice("tpd: %s val %d.\n", __func__, input);
+	if (cdev->set_sleep_mode) {
+		cdev->set_sleep_mode(cdev, input);
+	}
+	return len;
+}
+
+static const struct file_operations proc_ops_sleep_mode = {
+	.owner = THIS_MODULE,
+	.read =  tp_sleep_mode_read,
+	.write = tp_sleep_mode_write,
+};
+
+static void create_tpd_sleep_mode_entry(void)
+{
+	struct proc_dir_entry *tpd_proc_dir;
+	struct proc_dir_entry *tpd_proc_entry;
+
+	tpd_proc_dir = proc_mkdir("touchscreen", NULL);
+	tpd_proc_entry = proc_create("sleep_mode_enable", 0664, tpd_proc_dir, &proc_ops_sleep_mode);
+	if (tpd_proc_entry == NULL)
+		pr_notice("proc create sleep_mode_enable failed!\n");	
+}
 static struct kobject *tpd_wake_gesture_kobj;
 static ssize_t tpd_wake_gesture_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -535,6 +588,7 @@ int tpd_classdev_register(struct device *parent, struct tpd_classdev_t *tsp_fw_c
 	mutex_init(&tsp_fw_cdev->cmd_mutex);	
 	//tpd_create_wake_gesture_sysfs();
 	create_tpd_proc_entry();
+	create_tpd_sleep_mode_entry();
 	printk("tpd: Registered tsp_fw device: %s\n",tsp_fw_cdev->name);
 
 	return 0;
@@ -561,28 +615,31 @@ static int __init tpd_class_init(void)
 	tsp_fw_class = class_create(THIS_MODULE, "tsp_fw");
 	if (IS_ERR(tsp_fw_class))
 		return PTR_ERR(tsp_fw_class);	
-	tpd_fw_cdev.name = "touchscreen";
-	tpd_fw_cdev.private = NULL;
-	tpd_fw_cdev.read_block = NULL;
-	tpd_fw_cdev.write_block = NULL;
-	tpd_fw_cdev.get_tpinfo = NULL;	
-	tpd_fw_cdev.get_gesture = NULL;
-	tpd_fw_cdev.wake_gesture = NULL;
-	tpd_fw_cdev.b_gesture_enable=0;
-    //for tpd test
-    tpd_fw_cdev.tpd_test_set_save_filepath = NULL;
-	tpd_fw_cdev.tpd_test_get_save_filepath = NULL;
-	tpd_fw_cdev.tpd_test_set_ini_filepath = NULL;
-	tpd_fw_cdev.tpd_test_get_ini_filepath = NULL;
-	tpd_fw_cdev.tpd_test_set_filename = NULL;
-	tpd_fw_cdev.tpd_test_get_filename = NULL;
-	tpd_fw_cdev.tpd_test_set_cmd = NULL;
-	tpd_fw_cdev.tpd_test_get_cmd = NULL;
-	tpd_fw_cdev.tpd_test_set_node_data_type = NULL;
-	tpd_fw_cdev.tpd_test_get_node_data = NULL;
-	tpd_fw_cdev.tpd_test_get_channel_info = NULL;
-	tpd_fw_cdev.tpd_test_get_result = NULL;
-	tpd_fw_cdev.TP_ESD_check =NULL; //zhangjian add for TP esd check
+      tpd_fw_cdev.name = "touchscreen";
+      tpd_fw_cdev.private = NULL;
+      tpd_fw_cdev.read_block = NULL;
+      tpd_fw_cdev.write_block = NULL;
+      tpd_fw_cdev.get_tpinfo = NULL;	
+      tpd_fw_cdev.get_gesture = NULL;
+      tpd_fw_cdev.wake_gesture = NULL;
+      tpd_fw_cdev.get_sleep_mode = NULL;
+      tpd_fw_cdev.set_sleep_mode = NULL;
+      tpd_fw_cdev.b_gesture_enable = 0;
+      tpd_fw_cdev.b_sleep_enable = 0;
+      //for tpd test
+      tpd_fw_cdev.tpd_test_set_save_filepath = NULL;
+      tpd_fw_cdev.tpd_test_get_save_filepath = NULL;
+      tpd_fw_cdev.tpd_test_set_ini_filepath = NULL;
+      tpd_fw_cdev.tpd_test_get_ini_filepath = NULL;
+      tpd_fw_cdev.tpd_test_set_filename = NULL;
+      tpd_fw_cdev.tpd_test_get_filename = NULL;
+      tpd_fw_cdev.tpd_test_set_cmd = NULL;
+      tpd_fw_cdev.tpd_test_get_cmd = NULL;
+      tpd_fw_cdev.tpd_test_set_node_data_type = NULL;
+      tpd_fw_cdev.tpd_test_get_node_data = NULL;
+      tpd_fw_cdev.tpd_test_get_channel_info = NULL;
+      tpd_fw_cdev.tpd_test_get_result = NULL;
+      tpd_fw_cdev.TP_ESD_check =NULL; //zhangjian add for TP esd check
       tpd_classdev_register(NULL, &tpd_fw_cdev);
       if (IS_ERR(tpd_fw_cdev.dev)) 
       {

@@ -4270,6 +4270,29 @@ static int tpd_enable_wakegesture(struct tpd_classdev_t *cdev, int enable)
     ts->enable_wakeup_gesture = enable;    
     return enable;
 }
+
+static int tpd_get_sleep_mode(struct tpd_classdev_t *cdev)
+{
+    struct synaptics_rmi4_data *ts = (struct synaptics_rmi4_data*) cdev->private;
+
+    printk("%s sleep mode enable val is:%d.\n", __func__, ts->enable_sleep_mode);
+    cdev->b_sleep_enable = ts->enable_sleep_mode;
+    return 0;
+}
+static int tpd_set_sleep_mode(struct tpd_classdev_t *cdev, int enable)
+{
+    struct synaptics_rmi4_data *ts = (struct synaptics_rmi4_data*) cdev->private;
+    
+    printk("%s previous val is:%d, current val is:%d.\n", __func__, ts->enable_sleep_mode, enable);    
+    ts->enable_sleep_mode = enable;  
+    if (ts->suspend)
+        return 0;
+    if (ts->enable_sleep_mode)
+        synaptics_rmi4_sleep_enable(ts, true);
+    else
+        synaptics_rmi4_sleep_enable(ts, false);
+    return enable;
+}
 //zhangjian add for TP esd check
 static int synaptics_TP_ESD_check(struct tpd_classdev_t *cdev)
 {
@@ -4298,6 +4321,8 @@ static int tpd_register_fw_class(struct synaptics_rmi4_data *data)
 	tpd_fw_cdev.get_tpinfo = tpd_init_tpinfo;
 	tpd_fw_cdev.get_gesture = tpd_get_wakegesture;
 	tpd_fw_cdev.wake_gesture = tpd_enable_wakegesture;
+	tpd_fw_cdev.get_sleep_mode = tpd_get_sleep_mode;
+	tpd_fw_cdev.set_sleep_mode = tpd_set_sleep_mode;
 	tpd_fw_cdev.TP_ESD_check  = synaptics_TP_ESD_check; //zhangjian add for TP esd check
 	return 0;
 }
@@ -4342,6 +4367,7 @@ static int synaptics_rmi4_probe(struct platform_device *pdev)
 	rmi4_data->suspend = false;
 	rmi4_data->irq_enabled = false;
 	rmi4_data->fingers_on_2d = false;
+	rmi4_data->enable_sleep_mode = false;
 	rmi4_data->reset_device = synaptics_rmi4_reset_device;
 	rmi4_data->irq_enable = synaptics_rmi4_irq_enable;
 	rmi4_data->sleep_enable = synaptics_rmi4_sleep_enable;
@@ -4842,18 +4868,18 @@ static int synaptics_rmi4_fb_notifier_cb(struct notifier_block *self,
 			transition = evdata->data;
 		if(bdata->resume_in_workqueue){
 			printk("syna,enter new control resume\n");
-
-		   if( (FB_BLANK_UNBLANK == *transition && FB_EVENT_BLANK == event) || 
-			(FB_BLANK_POWERDOWN == *transition && FB_R_EARLY_EVENT_BLANK == event)) {
-			printk("%s lcd on notifier.\n", __func__);
-			schedule_work(&rmi4_data->fb_notify_work);
-			rmi4_data->fb_ready = true;
-		   	}
-			else if( FB_BLANK_POWERDOWN == *transition && FB_EARLY_EVENT_BLANK == event) {
-			printk("%s lcd off notifier.\n", __func__);
-			flush_work(&rmi4_data->fb_notify_work);
-  			synaptics_rmi4_suspend(&rmi4_data->pdev->dev);
-			rmi4_data->fb_ready = false;
+			if (event == FB_EVENT_BLANK) {
+				//transition = evdata->data;
+				if (*transition == FB_BLANK_POWERDOWN) {
+					printk("%s lcd off notifier.\n", __func__);
+					flush_work(&rmi4_data->fb_notify_work);
+					synaptics_rmi4_suspend(&rmi4_data->pdev->dev);
+					rmi4_data->fb_ready = false;
+				} else if (*transition == FB_BLANK_UNBLANK) {
+					printk("%s lcd on notifier.\n", __func__);
+					schedule_work(&rmi4_data->fb_notify_work);
+					rmi4_data->fb_ready = true;
+				}
 			}
 		}
 		else{
@@ -4999,6 +5025,8 @@ static int synaptics_rmi4_suspend(struct device *dev)
 		if (retval < 0)
 			dev_err(dev, "Cannot get idle pinctrl state\n");
 	}
+	if (power_off_remove_to_TP)
+		msm_dss_vreg_power_off();
 exit:
 	mutex_lock(&exp_data.mutex);
 	if (!list_empty(&exp_data.list)) {
@@ -5068,8 +5096,8 @@ static int synaptics_rmi4_resume(struct device *dev)
 
 
 	rmi4_data->current_page = MASK_8BIT;
-
-	synaptics_rmi4_sleep_enable(rmi4_data, false);
+	if (!rmi4_data->enable_sleep_mode)
+		synaptics_rmi4_sleep_enable(rmi4_data, false);
 	synaptics_rmi4_irq_enable(rmi4_data, true, false);
 
 exit:
@@ -5102,6 +5130,11 @@ exit:
            }
        }
 	   //add end
+	if (rmi4_data->enable_sleep_mode)
+	{
+		printk("Set TP to sleep mode!");
+		synaptics_rmi4_sleep_enable(rmi4_data, true);
+	}
 	return 0;
 }
 
@@ -5146,7 +5179,11 @@ static void __exit synaptics_rmi4_exit(void)
 	return;
 }
 
+#ifdef CONFIG_DO_DEFERRED_INITCALL
+deferred_module_init(synaptics_rmi4_init);
+#else
 module_init(synaptics_rmi4_init);
+#endif
 module_exit(synaptics_rmi4_exit);
 
 MODULE_AUTHOR("Synaptics, Inc.");

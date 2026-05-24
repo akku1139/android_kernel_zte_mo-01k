@@ -44,7 +44,7 @@ static void zte_lcd_reg_rw_func(struct mdss_dsi_ctrl_pdata *ctrl,struct zte_lcd_
 		case 0:
 			write_lcd_cmd.dchdr.ack = 0;
 			write_lcd_cmd.dchdr.wait = 5;//5 ms
-			cmdreq.flags = CMD_REQ_COMMIT | CMD_CLK_CTRL;
+			cmdreq.flags = CMD_REQ_COMMIT;
 			cmdreq.rbuf = NULL;
 			cmdreq.rlen = 0;
 			break;

@@ -70,6 +70,7 @@
 #include "ebitmap.h"
 #include "audit.h"
 
+
 /*
  * Postproc av permissions
  *
@@ -82,6 +83,7 @@
 #if defined(CONFIG_SECURITY_SELINUX_POLICYPROC)
 #include "policyproc.h"
 #endif /* CONFIG_SECURITY_SELINUX_POLICYPROC */
+
 
 int selinux_policycap_netpeer;
 int selinux_policycap_openperm;
@@ -1181,6 +1183,10 @@ void security_compute_av_user(u32 ssid,
 
 	context_struct_compute_av(scontext, tcontext, tclass, avd, NULL);
 
+ out:
+	read_unlock(&policy_rwlock);
+	
+
 /*
  * Postproc av permissions
  *
@@ -1194,8 +1200,6 @@ void security_compute_av_user(u32 ssid,
 	(void)pp_postproc_av_perms(&policydb, ssid, tsid, tclass, &avd->allowed);
 #endif /* CONFIG_SECURITY_SELINUX_POLICYPROC */
 
-out:
-	read_unlock(&policy_rwlock);
 	return;
 allow:
 	avd->allowed = 0xffffffff;

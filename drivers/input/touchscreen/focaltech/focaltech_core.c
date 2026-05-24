@@ -2444,7 +2444,11 @@ static void __exit fts_ts_exit(void)
 	i2c_del_driver(&fts_ts_driver);
 }
 
-module_init(fts_ts_init);
+#ifdef CONFIG_DO_DEFERRED_INITCALL
+deferred_module_init(fts_ts_init);
+#else
+module_ini(fts_ts_init);
+#endif
 module_exit(fts_ts_exit);
 
 MODULE_DESCRIPTION("FocalTech fts TouchScreen driver");

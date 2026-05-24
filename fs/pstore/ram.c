@@ -43,9 +43,7 @@ module_param(record_size, ulong, 0400);
 MODULE_PARM_DESC(record_size,
 		"size of each dump done on oops/panic");
 
-//static ulong ramoops_console_size = MIN_MEM_SIZE;
-static ulong ramoops_console_size = 256*1024UL;
-
+static ulong ramoops_console_size = MIN_MEM_SIZE;
 module_param_named(console_size, ramoops_console_size, ulong, 0400);
 MODULE_PARM_DESC(console_size, "size of kernel console log");
 
@@ -57,21 +55,12 @@ static ulong ramoops_pmsg_size = MIN_MEM_SIZE;
 module_param_named(pmsg_size, ramoops_pmsg_size, ulong, 0400);
 MODULE_PARM_DESC(pmsg_size, "size of user space message log");
 
-/* ZSW Modified to 0xB0000000, same as defined in SBL1 and aboot */
-/*
 static ulong mem_address;
-*/
-static ulong mem_address = 0xB0000000;
 module_param(mem_address, ulong, 0400);
 MODULE_PARM_DESC(mem_address,
 		"start of reserved RAM used to store oops/panic logs");
 
-/* ZSW Modified to 0x100000, same as defined in SBL1 and aboot */
-/*
 static ulong mem_size;
-*/
-static ulong mem_size = 0x100000;
-
 module_param(mem_size, ulong, 0400);
 MODULE_PARM_DESC(mem_size,
 		"size of reserved RAM used to store oops/panic logs");
@@ -316,6 +305,24 @@ static int notrace ramoops_pstore_write_buf(enum pstore_type_id type,
 	return 0;
 }
 
+static int notrace ramoops_pstore_write_buf_user(enum pstore_type_id type,
+						 enum kmsg_dump_reason reason,
+						 u64 *id, unsigned int part,
+						 const char __user *buf,
+						 bool compressed, size_t size,
+						 struct pstore_info *psi)
+{
+	if (type == PSTORE_TYPE_PMSG) {
+		struct ramoops_context *cxt = psi->data;
+
+		if (!cxt->mprz)
+			return -ENOMEM;
+		return persistent_ram_write_user(cxt->mprz, buf, size);
+	}
+
+	return -EINVAL;
+}
+
 static int ramoops_pstore_erase(enum pstore_type_id type, u64 id, int count,
 				struct timespec time, struct pstore_info *psi)
 {
@@ -354,6 +361,7 @@ static struct ramoops_context oops_cxt = {
 		.open	= ramoops_pstore_open,
 		.read	= ramoops_pstore_read,
 		.write_buf	= ramoops_pstore_write_buf,
+		.write_buf_user	= ramoops_pstore_write_buf_user,
 		.erase	= ramoops_pstore_erase,
 	},
 };
@@ -401,7 +409,7 @@ static int ramoops_init_przs(struct device *dev, struct ramoops_context *cxt,
 
 		cxt->przs[i] = persistent_ram_new(*paddr, sz, 0,
 						  &cxt->ecc_info,
-						  cxt->memtype);
+						  cxt->memtype, 0);
 		if (IS_ERR(cxt->przs[i])) {
 			err = PTR_ERR(cxt->przs[i]);
 			dev_err(dev, "failed to request mem region (0x%zx@0x%llx): %d\n",
@@ -425,14 +433,14 @@ static int ramoops_init_prz(struct device *dev, struct ramoops_context *cxt,
 		return 0;
 
 	if (*paddr + sz - cxt->phys_addr > cxt->size) {
-                pr_err("Failed because of NOMEM\n");
 		dev_err(dev, "no room for mem region (0x%zx@0x%llx) in (0x%lx@0x%llx)\n",
 			sz, (unsigned long long)*paddr,
 			cxt->size, (unsigned long long)cxt->phys_addr);
 		return -ENOMEM;
 	}
 
-	*prz = persistent_ram_new(*paddr, sz, sig, &cxt->ecc_info, cxt->memtype);
+	*prz = persistent_ram_new(*paddr, sz, sig, &cxt->ecc_info,
+				  cxt->memtype, 0);
 	if (IS_ERR(*prz)) {
 		int err = PTR_ERR(*prz);
 
@@ -441,10 +449,7 @@ static int ramoops_init_prz(struct device *dev, struct ramoops_context *cxt,
 		return err;
 	}
 
-    /* ZSW deleted, save SBL1 and aboot logs in the console buffer */
-    /*
 	persistent_ram_zap(*prz);
-	*/
 
 	*paddr += sz;
 
@@ -454,9 +459,6 @@ static int ramoops_init_prz(struct device *dev, struct ramoops_context *cxt,
 void notrace ramoops_console_write_buf(const char *buf, size_t size)
 {
 	struct ramoops_context *cxt = &oops_cxt;
-
-        pr_err("+++ramoops_console_write_buf()\n");
-       
 	persistent_ram_write(cxt->cprz, buf, size);
 }
 
@@ -469,8 +471,6 @@ static int ramoops_probe(struct platform_device *pdev)
 	phys_addr_t paddr;
 	int err = -EINVAL;
 
-    pr_err("+++ramoops_probe()\n");
-       
 	/* Only a single ramoops area allowed at a time, so fail extra
 	 * probes.
 	 */
@@ -494,12 +494,10 @@ static int ramoops_probe(struct platform_device *pdev)
 		pdata->pmsg_size = rounddown_pow_of_two(pdata->pmsg_size);
 
 	cxt->size = pdata->mem_size;
-        pr_err("cxt->size = %d\n", (int)cxt->size);
 	cxt->phys_addr = pdata->mem_address;
 	cxt->memtype = pdata->mem_type;
 	cxt->record_size = pdata->record_size;
 	cxt->console_size = pdata->console_size;
-        pr_err("cxt->console_size = %d\n", (int)cxt->console_size);
 	cxt->ftrace_size = pdata->ftrace_size;
 	cxt->pmsg_size = pdata->pmsg_size;
 	cxt->dump_oops = pdata->dump_oops;
@@ -507,15 +505,11 @@ static int ramoops_probe(struct platform_device *pdev)
 
 	paddr = cxt->phys_addr;
 
-    /* ZSW deleted */
-    if(0)
-    {
 	dump_mem_sz = cxt->size - cxt->console_size - cxt->ftrace_size
 			- cxt->pmsg_size;
 	err = ramoops_init_przs(dev, cxt, &paddr, dump_mem_sz);
 	if (err)
 		goto fail_out;
-    }
 
 	err = ramoops_init_prz(dev, cxt, &cxt->cprz, &paddr,
 			       cxt->console_size, 0);
@@ -564,11 +558,7 @@ static int ramoops_probe(struct platform_device *pdev)
 	record_size = pdata->record_size;
 	dump_oops = pdata->dump_oops;
 
-    pr_err("mem_size = %d\n", (int)mem_size);
-    pr_err("mem_address = %d\n", (int)mem_address);
-    pr_err("record_size = %d\n", (int)record_size);
-
-	pr_err("attached 0x%lx@0x%llx, ecc: %d/%d\n",
+	pr_info("attached 0x%lx@0x%llx, ecc: %d/%d\n",
 		cxt->size, (unsigned long long)cxt->phys_addr,
 		cxt->ecc_info.ecc_size, cxt->ecc_info.block_size);
 
@@ -623,11 +613,9 @@ static struct platform_driver ramoops_driver = {
 static void ramoops_register_dummy(void)
 {
 	if (!mem_size)
-	{
-                pr_err("mem_size is 0!!\n");
 		return;
-	}
-	pr_err("using module parameters\n");
+
+	pr_info("using module parameters\n");
 
 	dummy_data = kzalloc(sizeof(*dummy_data), GFP_KERNEL);
 	if (!dummy_data) {
